@@ -1,0 +1,186 @@
+services:
+  # Option A: use prebuilt community image (quick start)
+  musicgen_remote:
+    image: ecchigoshujinsama/musicgen-audiocraft:latest
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./cache:/workspace/cache
+      - .:/workspace
+    environment:
+      - HF_HOME=/workspace/cache
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    ports:
+      - "7860:7860" # If you run a Gradio app inside the container
+    command: ["bash", "-lc", "python -u /workspace/handler.py"]
+
+  # Option B: build the local image from the Dockerfiles in this folder. This is slower but
+  # can be customized and is useful if you want to reproduce the environment or add tools.
+  # To use the local image, run: docker compose up --build --no-deps musicgen_local
+  musicgen_local:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./cache:/workspace/cache
+      - .:/workspace
+    environment:
+      - HF_HOME=/workspace/cache
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    ports:
+      - "7860:7860"
+    command: ["bash", "-lc", "python -u /workspace/generate.py 'a short piano loop'"]
+
+  musicgen_local_gradio:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./cache:/workspace/cache
+      - .:/workspace
+    environment:
+      - HF_HOME=/workspace/cache
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    ports:
+      - "7860:7860"
+    command: ["bash", "-lc", "/workspace/start.sh app"]
+
+  musicgen_local_accelerate:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./cache:/workspace/cache
+      - .:/workspace
+      - ./offload:/workspace/offload
+    environment:
+      - HF_HOME=/workspace/cache
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    command: ["bash", "-lc", "/workspace/start.sh accelerate --model medium --prompt 'a moody synth loop' --duration 4"]
+
+  # Quick service to run a medium-model generation test and save out_medium.wav to the repo workspace
+  musicgen_local_test_medium:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./cache:/workspace/cache
+      - .:/workspace
+    environment:
+      - HF_HOME=/workspace/cache
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    command: ["bash", "-lc", "python /workspace/generate_test_medium.py"]
+
+  # Service to run an FSDP-dispatch-based generation (attempts to use accelerate FSDP/dispatch)
+  musicgen_local_fsdp:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./cache:/workspace/cache
+      - .:/workspace
+      - ./offload:/workspace/offload
+    environment:
+      - HF_HOME=/workspace/cache
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    command: ["bash", "-lc", "/workspace/start.sh fsdp --model large --prompt 'a moody synth loop' --duration 4"]
+
+  # Service that uses the community-based image as a base but adds accelerate for FSDP etc.
+  musicgen_local_from_remote:
+    build:
+      context: .
+      dockerfile: Dockerfile.community
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./cache:/workspace/cache
+      - .:/workspace
+      - ./offload:/workspace/offload
+    environment:
+      - HF_HOME=/workspace/cache
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    command: ["bash", "-lc", "/workspace/start.sh fsdp --model large --prompt 'a moody synth loop' --duration 4"]
+
+  # Dedicated compose entrypoint for a large model FSDP offload run (single GPU, disk offload)
+  musicgen_local_large_fsdp:
+    image: docker-musicgen_local_from_remote:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.community
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./cache:/workspace/cache
+      - .:/workspace
+      - ./offload:/workspace/offload
+    environment:
+      - HF_HOME=/workspace/cache
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - ACCEL_CONFIG=/workspace/accelerate_config_fsdp_legacy.yaml
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    command: ["bash", "-lc", "/workspace/start.sh fsdp --model large --prompt 'a moody synth loop' --duration 4"]

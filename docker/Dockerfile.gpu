@@ -1,0 +1,86 @@
+# GPU Dockerfile for running AudioCraft MusicGen
+# Base image: pytorch w/ cuda and cudnn
+
+FROM pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
+
+# Avoid warnings
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    bzip2 \
+    ca-certificates \
+    pkg-config \
+    build-essential \
+    libsndfile1 \
+    libportaudio2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN python -m pip install --upgrade pip setuptools wheel
+
+# NOTE: PyAV (the `av` package) requires FFmpeg/Libav headers that must be ABI compatible
+# with the PyAV/av package. Building `av` from source often fails because the system
+# FFmpeg dev headers doesn't match the expected API. To avoid the `AV_CODEC_CAP_OTHER_THREADS`
+# and similar errors, we install `ffmpeg` and `pyav` from conda-forge via micromamba so that
+# binary packages are guaranteed to be compatible with each other.
+
+# Install micromamba (lightweight conda) and use conda-forge packages for ffmpeg + pyav
+ENV MAMBA_DIR=/opt/micromamba
+RUN mkdir -p ${MAMBA_DIR} && \
+    curl -L -s https://micro.mamba.pm/api/micromamba/linux-64/latest -o /tmp/micromamba && \
+    mkdir -p ${MAMBA_DIR}/bin && \
+    tar -xvf /tmp/micromamba -C ${MAMBA_DIR}/bin --strip-components=1 && \
+    rm -f /tmp/micromamba && \
+    ${MAMBA_DIR}/bin/micromamba shell init -s bash -p /opt/conda || true
+ENV PATH=${MAMBA_DIR}/bin:$PATH
+ENV PATH=/opt/conda/bin:$PATH
+ENV PKG_CONFIG_PATH=/opt/conda/lib/pkgconfig:/opt/conda/share/pkgconfig:/usr/lib/pkgconfig:/usr/local/lib/pkgconfig
+
+# Install ffmpeg + pyav from conda-forge
+RUN micromamba install -y -n base -c conda-forge ffmpeg=6 -c conda-forge && \
+    micromamba clean --all -y
+
+# Try to install PyAV from conda-forge first; if not available fall back to pip install av.
+RUN micromamba install -y -n base -c conda-forge pyav || python -m pip install av || true
+ENV HF_HOME=/workspace/cache
+ENV AUDIOCRAFT_CACHE_DIR=/workspace/cache
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128,garbage_collection_threshold:0.6,expandable_segments:True
+ENV TORCH_CUDNN_V8_API_ENABLED=1
+ENV CUDA_LAUNCH_BLOCKING=0
+
+# Install AudioCraft and helpful libs; pin to a known working release when possible.
+# Install AudioCraft and helpful libs; pin to a known working release when possible.
+# Use pip for av when a binary wheel is available (or will build against conda ffmpeg)
+RUN python -m pip install --no-cache-dir git+https://github.com/facebookresearch/audiocraft.git torchaudio transformers accelerate av
+# Gradio + accelerate + optional helpers
+RUN python -m pip install --no-cache-dir gradio
+# Install optional accelerator extras for FSDP and deepspeed if available (may be heavy)
+RUN python -m pip install --no-cache-dir "accelerate[deepspeed]" || true
+RUN python -m pip install --no-cache-dir deepspeed || true
+RUN python -m pip install --no-cache-dir accelerate[fsdp] || true
+# xformers is optional - if a matching wheel is not found you can omit it; it speeds up attention
+RUN python -m pip install --no-cache-dir xformers==0.0.22.post7 || true
+
+# Add a user and app directory
+RUN useradd -ms /bin/bash audiouser && mkdir -p /workspace
+WORKDIR /workspace
+USER audiouser
+
+# Put example script
+COPY --chown=audiouser:audiouser examples/generate.py /workspace/generate.py
+# Copy app and examples
+COPY --chown=audiouser:audiouser examples/generate_heavy.py /workspace/generate_heavy.py
+COPY --chown=audiouser:audiouser app.py /workspace/app.py
+COPY --chown=audiouser:audiouser generate_accelerate.py /workspace/generate_accelerate.py
+COPY --chown=audiouser:audiouser generate_fsdp.py /workspace/generate_fsdp.py
+COPY --chown=audiouser:audiouser generate_test_medium.py /workspace/generate_test_medium.py
+COPY --chown=audiouser:audiouser handler.py /workspace/handler.py
+COPY --chown=audiouser:audiouser start.sh /workspace/start.sh
+COPY --chown=audiouser:audiouser accelerate_config.yaml /workspace/accelerate_config.yaml
+RUN chmod +x /workspace/start.sh
+
+# Default command - open a shell
+CMD ["/bin/bash", "/workspace/start.sh", "handler"]

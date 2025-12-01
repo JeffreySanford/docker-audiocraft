@@ -1,0 +1,19 @@
+# Start from a known-good community image that already includes avi / ffmpeg prebuilt libs
+FROM ecchigoshujinsama/musicgen-audiocraft:latest
+
+# Install accelerate & deepspeed extras and gradio, etc. This keeps av/ffmpeg from being rebuilt
+RUN python -m pip install --no-cache-dir "accelerate[deepspeed,fsdp]>=0.25.0" gradio || python -m pip install --no-cache-dir "accelerate[deepspeed,fsdp]" gradio || true
+# Try to ensure a recent accelerate version (so dispatch/load helpers are present)
+RUN python -m pip install --upgrade --no-cache-dir accelerate || true
+
+# Copy our scripts and configs
+COPY --chown=root:root ./generate_test_medium.py /workspace/generate_test_medium.py
+COPY --chown=root:root ./generate_accelerate.py /workspace/generate_accelerate.py
+COPY --chown=root:root ./generate_fsdp.py /workspace/generate_fsdp.py
+COPY --chown=root:root ./accelerate_config_offload.yaml /workspace/accelerate_config_offload.yaml
+COPY --chown=root:root ./accelerate_config_fsdp.yaml /workspace/accelerate_config_fsdp.yaml
+COPY --chown=root:root ./start.sh /workspace/start.sh
+RUN chmod +x /workspace/start.sh
+
+# Default command
+CMD ["bash", "-lc", "/workspace/start.sh handler"]

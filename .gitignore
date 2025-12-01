@@ -1,0 +1,29 @@
+# Ignore venvs and caches inside docker folder
+/docker/venv/
+/docker/venv_main/
+/docker/cache/
+/docker/offload/
+/docker/__pycache__/
+/docker/*.pyc
+/docker/*.wav
+/docker/*.mp3
+/docker/*.pt
+
+# Editor and OS files
+.DS_Store
+.env
+*.log
+
+# Python patterns
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.whl
+
+# HuggingFace caches in repository directories
+**/cache/
+
+# Notebooks
+.ipynb_checkpoints/
+

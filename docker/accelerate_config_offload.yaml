@@ -1,0 +1,25 @@
+compute_environment: LOCAL_MACHINE
+deepspeed_config: {}
+dispatch_backend: 'cpu'
+dtype: 'float16'
+distributed_type: 'NO'
+fp16: true
+machine_rank: 0
+main_process_ip: null
+main_process_port: null
+main_training_function: null
+mixed_precision: 'fp16'
+num_machines: 1
+num_processes: 1
+use_cpu: false
+
+# Offload settings (single GPU): accelerate will offload parameters to CPU and to disk if necessary.
+offload:
+  device: cpu
+  pin_memory: true
+  offload_folder: ./offload
+
+# Notes:
+# - This config is intended for single-GPU setups where GPU VRAM is not sufficient for a large model.
+# - It uses automatic device mapping (device_map='auto' in scripts) and relies on accelerate's dispatch.
+# - Use accelerates `device_map='auto'` for dispatching to reduce GPU RAM usage.

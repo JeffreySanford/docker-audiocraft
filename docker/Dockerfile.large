@@ -1,0 +1,45 @@
+FROM pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
+
+LABEL maintainer="ecchigoshujinsama + community"
+
+# Set timezone and noninteractive front-end (Bismarck, ND => America/Chicago)
+ARG TZ="America/Chicago"
+ENV TZ=${TZ}
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git bzip2 libsndfile1 ffmpeg tzdata && rm -rf /var/lib/apt/lists/*
+RUN ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && dpkg-reconfigure -f noninteractive tzdata || true
+
+RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
+ENV MAMBA_ROOT_PREFIX=/mamba
+RUN micromamba create -y -n base -c conda-forge python=3.11 ffmpeg pyav || true
+ENV PATH=/mamba/envs/base/bin:$PATH
+
+# Create and set up a venv to install packages in isolation from system site-packages
+RUN python -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+RUN python -m pip install --upgrade pip
+
+# Install accelerate from source (main) to get new big model features and modern utilities
+RUN python -m pip install --no-cache-dir git+https://github.com/huggingface/accelerate.git@main
+
+# Install pinned versions for torch and audiocraft (audiocraft expects torch 2.1.0 and numpy<2.0.0)
+RUN python -m pip install --no-cache-dir torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0
+
+# Install audiocraft and other dependencies; pin versions known to be compatible with torch 2.1.0
+RUN python -m pip install --no-cache-dir git+https://github.com/facebookresearch/audiocraft@main#egg=audiocraft || python -m pip install --no-cache-dir audiocraft
+RUN python -m pip install --no-cache-dir gradio pyaml pyyaml
+
+# Copy helper scripts & accelerate config files
+COPY --chown=root:root ./generate_test_medium.py /workspace/generate_test_medium.py
+COPY --chown=root:root ./generate_accelerate.py /workspace/generate_accelerate.py
+COPY --chown=root:root ./generate_fsdp.py /workspace/generate_fsdp.py
+COPY --chown=root:root ./accelerate_config_fsdp.yaml /workspace/accelerate_config_fsdp.yaml
+COPY --chown=root:root ./accelerate_config_fsdp_legacy.yaml /workspace/accelerate_config_fsdp_legacy.yaml
+COPY --chown=root:root ./start.sh /workspace/start.sh
+RUN chmod +x /workspace/start.sh
+
+WORKDIR /workspace
+CMD ["bash", "-lc", "/workspace/start.sh handler"]

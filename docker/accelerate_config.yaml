@@ -1,0 +1,26 @@
+compute_environment: LOCAL_MACHINE
+deepspeed_config: {}
+dispatch_backend: 'cpu'
+dtype: 'float16'
+distributed_type: 'NO'
+fp16: true
+machine_rank: 0
+main_process_ip: null
+main_process_port: null
+main_training_function: null
+mixed_precision: 'fp16'
+num_machines: 1
+num_processes: 1
+use_cpu: false
+
+# Optional: if you need CPU offload / disk offload for very large models
+offload:
+  device: cpu
+  pin_memory: true
+  # folder should exist or accelerate will create it
+  offload_folder: ./offload
+
+# FSDP / Offload tips:
+# - To enable FSDP or multi-gpu runs, set `distributed_type: 'MULTI_GPU'` and increase `num_processes` accordingly.
+# - For single-GPU with CPU offload, leave `distributed_type` as 'NO' and rely on accelerate dispatch with `device_map='auto'` in the script.
+# - Make sure the offload folder exists and is mappable as a volume to the container.

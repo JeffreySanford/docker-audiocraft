@@ -1,0 +1,32 @@
+compute_environment: LOCAL_MACHINE
+deepspeed_config: {}
+dispatch_backend: 'cpu'
+dtype: 'float16'
+distributed_type: 'MULTI_GPU'
+fp16: true
+machine_rank: 0
+main_process_ip: null
+main_process_port: null
+main_training_function: null
+mixed_precision: 'fp16'
+num_machines: 1
+num_processes: 2
+use_cpu: false
+
+# FSDP options - tune for your environment
+# If running on a single machine with multiple GPUs set num_processes to the number of GPUs
+fsdp_config:
+  sharding_strategy: 'FULL_SHARD'
+  min_num_params: 1e8
+  cpu_offload: true
+  auto_wrap_policy: null
+
+# Offload folder used to swap tensors to CPU/disk
+offload:
+  device: cpu
+  offload_folder: ./offload
+
+# Notes:
+# - For multiple GPUs, increase `num_processes` accordingly and ensure `machine_rank` is correct.
+# - Ensure you map the `./offload` folder into the container and have sufficient RAM/disk.
+# - FSDP may require PyTorch compiled with FSDP support and the correct accelerate and deepspeed versions.
