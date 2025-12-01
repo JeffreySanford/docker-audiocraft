@@ -9,7 +9,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git bzip2 libsndfile1 ffmpeg tzdata && rm -rf /var/lib/apt/lists/*
+    ca-certificates curl git bzip2 libsndfile1 ffmpeg tzdata pkg-config build-essential \
+    libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev libswscale-dev libavfilter-dev libopus-dev libvpx-dev && rm -rf /var/lib/apt/lists/*
 RUN ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && dpkg-reconfigure -f noninteractive tzdata || true
 
 RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
@@ -22,11 +23,11 @@ RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 RUN python -m pip install --upgrade pip
 
-# Install accelerate from source (main) to get new big model features and modern utilities
-RUN python -m pip install --no-cache-dir git+https://github.com/huggingface/accelerate.git@main
-
 # Install pinned versions for torch and audiocraft (audiocraft expects torch 2.1.0 and numpy<2.0.0)
 RUN python -m pip install --no-cache-dir torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0
+
+# Install accelerate from source (main) to get new big model features and modern utilities
+RUN python -m pip install --no-cache-dir git+https://github.com/huggingface/accelerate.git@main
 
 # Install audiocraft and other dependencies; pin versions known to be compatible with torch 2.1.0
 RUN python -m pip install --no-cache-dir git+https://github.com/facebookresearch/audiocraft@main#egg=audiocraft || python -m pip install --no-cache-dir audiocraft
