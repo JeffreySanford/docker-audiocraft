@@ -14,13 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && dpkg-reconfigure -f noninteractive tzdata || true
 
 RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
+# Ensure conda base env is present and ON PATH (we will use the conda `python`/`pip`)
 ENV MAMBA_ROOT_PREFIX=/mamba
 RUN micromamba create -y -n base -c conda-forge python=3.11 ffmpeg pyav || true
+RUN micromamba install -y -n base -c conda-forge pyav=11.* || true
 ENV PATH=/mamba/envs/base/bin:$PATH
-
-# Create and set up a venv to install packages in isolation from system site-packages
-RUN python -m venv /opt/venv
-ENV PATH=/opt/venv/bin:$PATH
 RUN python -m pip install --upgrade pip
 
 # Install pinned versions for torch and audiocraft (audiocraft expects torch 2.1.0 and numpy<2.0.0)
