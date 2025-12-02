@@ -16,20 +16,31 @@ RUN ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && dpkg-reconfigure -f nonin
 RUN curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
 # Ensure conda base env is present and ON PATH (we will use the conda `python`/`pip`)
 ENV MAMBA_ROOT_PREFIX=/mamba
-RUN micromamba create -y -n base -c conda-forge python=3.11 ffmpeg pyav || true
-RUN micromamba install -y -n base -c conda-forge pyav=11.* || true
-ENV PATH=/mamba/envs/base/bin:$PATH
-RUN python -m pip install --upgrade pip
+# Use python 3.10 to keep parity with the base image's /opt/conda python and avoid mixing site-packages across py versions.
+RUN micromamba create -y -n base -c conda-forge python=3.10
+RUN micromamba install -y -n base -c conda-forge ffmpeg av || micromamba install -y -n base -c conda-forge ffmpeg pyav
+# Ensure conda environment binaries are on PATH
+ENV PATH=/mamba/bin:$PATH
+# Explicitly use the conda env python so pip runs in the correct environment
+RUN /mamba/bin/python -m pip install --upgrade pip
+RUN /mamba/bin/python -c "import sys; print('python from', sys.executable)"
 
 # Install pinned versions for torch and audiocraft (audiocraft expects torch 2.1.0 and numpy<2.0.0)
-RUN python -m pip install --no-cache-dir torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0
+RUN /mamba/bin/python -m pip install --no-cache-dir torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0
 
 # Install accelerate from source (main) to get new big model features and modern utilities
-RUN python -m pip install --no-cache-dir git+https://github.com/huggingface/accelerate.git@main
+RUN /mamba/bin/python -m pip install --no-cache-dir git+https://github.com/huggingface/accelerate.git@main
 
-# Install audiocraft and other dependencies; pin versions known to be compatible with torch 2.1.0
-RUN python -m pip install --no-cache-dir git+https://github.com/facebookresearch/audiocraft@main#egg=audiocraft || python -m pip install --no-cache-dir audiocraft
-RUN python -m pip install --no-cache-dir gradio pyaml pyyaml
+# Confirm conda-installed ffmpeg and pyav are present & importable before installing audiocraft (prevents pip from building av for the system python)
+RUN /mamba/bin/python -c "import av; print('av', av.__version__)"
+RUN /mamba/bin/python -c "import sys; import pkgutil; print('py path', sys.path[:3]); import pkgutil; print('av found:', pkgutil.find_loader('av') is not None)"
+RUN micromamba list -n base
+RUN /mamba/bin/python -c "import ffmpeg; print('ffmpeg presence check OK')" || true
+# Install audiocraft and other dependencies using the conda python to ensure pyav is not built from source
+RUN /mamba/bin/python -m pip install --no-cache-dir --no-deps git+https://github.com/facebookresearch/audiocraft@main#egg=audiocraft || /mamba/bin/python -m pip install --no-cache-dir --no-deps audiocraft
+# Install audiocraft dependencies via pip (avoid av build by not installing av==11)
+RUN /mamba/bin/python -m pip install --no-cache-dir gradio pyaml pyyaml transformers>=4.31.0 xformers==0.0.22.post7 demucs encodec librosa scipy scikit-learn soundfile soxr
+RUN /mamba/bin/python -m pip install --no-cache-dir torchmetrics timm
 
 # Copy helper scripts & accelerate config files
 COPY --chown=root:root ./generate_test_medium.py /workspace/generate_test_medium.py

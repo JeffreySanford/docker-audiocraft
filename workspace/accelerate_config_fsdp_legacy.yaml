@@ -1,0 +1,25 @@
+compute_environment: LOCAL_MACHINE
+distributed_type: 'NO'
+mixed_precision: 'fp16'
+num_processes: 1
+num_machines: 1
+machine_rank: 0
+main_process_ip: null
+main_process_port: null
+main_training_function: null
+use_cpu: false
+
+# FSDP options
+fsdp_config:
+  sharding_strategy: 'FULL_SHARD'
+  min_num_params: 1e8
+  cpu_offload: true
+  auto_wrap_policy: null
+
+# offload folder used to swap tensors to CPU/disk
+# If you need to set offload, you can set offload in accelerate 0.21 by using
+# a separate API or by letting the script configure device_map; for now we rely
+# on the fsdp_config 'cpu_offload' option.
+# offload:
+#   device: cpu
+#   offload_folder: ./offload

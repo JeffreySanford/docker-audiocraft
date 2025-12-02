@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  audiocraft-large:
+    image: audiocraft:large.community
+    # On systems with NVIDIA Container Toolkit, runtime: "nvidia" or device requests are used
+    runtime: nvidia
+    environment:
+      - AUDIOCRAFT_CACHE_DIR=/workspace/cache
+      - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
+    volumes:
+      - ./workspace:/workspace
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    command: bash -lc "python /workspace/run_large_offload3.py"
+    shm_size: 2g

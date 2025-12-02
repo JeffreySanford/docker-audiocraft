@@ -27,3 +27,46 @@ __pycache__/
 # Notebooks
 .ipynb_checkpoints/
 
+
+# Project-specific generated data and caches (avoid committing large ML artifacts)
+/workspace/debug/
+/workspace/output/
+/workspace/offload/
+/workspace/cache/
+/model-cache/
+/cache/
+
+# Accelerate/pytorch/transformers checkpoint and offload files
+*.pt
+*.pth
+*.bin
+*.ckpt
+*.safetensors
+*.tar
+*.zip
+*.npy
+
+# Common ML hub/cache dirs
+/transformers_cache/
+/huggingface/
+/.cache/huggingface/
+
+# Environment / credentials / tokens
+.env
+.env.*
+*.key
+*.pem
+credentials
+aws_credentials
+*.token
+.git-credentials
+
+# Debug and log files
+workspace/debug/*.log
+*.log
+
+# OS / editor
+.vscode/
+.idea/
+thumbs.db
+
