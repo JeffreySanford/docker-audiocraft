@@ -48,7 +48,51 @@ Run the scripts with these helpful env flags:
  - `--save-applied` : CLI flag to save the mapping applied (written to `--mapping-out`, default `/workspace/debug/comp_applied_mapping.json`).
  - `--force-cpu-lm` : CLI flag to keep LM on CPU (do not dispatch to GPU) when testing or when GPU memory is insufficient.
 
+## Model Cache Integrity
+
+To ensure model files are not corrupted and to avoid re-downloading, the repository includes checksum verification scripts.
+
+### Initial Setup
+After models are downloaded, update the checksums:
+
+```bash
+# Using Python directly (if installed)
+python scripts/check_model_checksums.py --update --cache-dir /path/to/model-cache
+
+# Or via Docker
+docker run --rm -v "C:/repos/docker-audiocraft/model-cache:/cache" audiocraft:large.community python /workspace/scripts/check_model_checksums.py --update --cache-dir /cache
+```
+
+### Monthly Verification
+Run monthly to check for changes or corruption:
+
+```bash
+# PowerShell script
+.\scripts\check_model_checksums.ps1 -CacheDir "C:\repos\docker-audiocraft\model-cache"
+
+# Or Python
+python scripts/check_model_checksums.py --cache-dir /path/to/model-cache
+```
+
+If checksums don't match, the script will report failures. You may need to clear the cache and re-download models.
+
+### Scheduling Monthly Checks
+On Windows, use Task Scheduler to run the PowerShell script monthly:
+1. Open Task Scheduler
+2. Create a new task
+3. Set trigger to monthly
+4. Action: Start a program
+5. Program: `powershell.exe`
+6. Arguments: `-File "C:\repos\docker-audiocraft\scripts\check_model_checksums.ps1" -CacheDir "C:\repos\docker-audiocraft\model-cache"`
+
 ## Notes
 - If compression keys are still unmatched, inspect the logs under `/workspace/debug` and adjust heuristics in `run_large_offload2.py` and `run_large_offload3.py`.
  - If compression keys are still unmatched, inspect the logs under `/workspace/debug` and adjust heuristics in `run_large_offload3.py` (the canonical offload script).
 - `AUDIOCRAFT_CACHE_DIR` is highly recommended to avoid re-downloading large hf blobs; make sure you have enough disk space.
+
+## Documentation
+
+Additional details about how generation and testing work are available under the `docs/` folder:
+
+- `docs/generation.md` – overview of the MusicGen models, offload strategy, prompts, and resource utilization.
+- `docs/testing.md` – end-to-end description of `scripts/run_tests.sh`, what each test does, and where logs/artifacts are stored.

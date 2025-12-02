@@ -1,0 +1,8 @@
+file 'output_industrial_small/industrial_small_1.wav'
+file 'output_industrial_medium/industrial_medium_1.wav'
+file 'output_industrial_small/industrial_small_2.wav'
+file 'output_industrial_medium/industrial_medium_2.wav'
+file 'output_industrial_small/industrial_small_3.wav'
+file 'output_industrial_medium/industrial_medium_3.wav'
+file 'output_industrial_small/industrial_small_4.wav'
+file 'output_industrial_small/industrial_small_5.wav'

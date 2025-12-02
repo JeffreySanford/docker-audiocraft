@@ -3,22 +3,13 @@ import os
 import sys
 import time
 import json
-import torch
-from omegaconf import OmegaConf
 import threading
 import time as _time
+
+import torch
 import torch.nn as nn
-
+from omegaconf import OmegaConf
 sys.path.append(os.path.dirname(__file__))
-
-from utils import (
-    find_fuzzy_match,
-    compute_match_score,
-    generate_transform_candidates,
-    match_by_suffix,
-    find_shape_match,
-    apply_mapping_to_module,
-)
 from audiocraft.models.builders import get_lm_model, get_compression_model
 from audiocraft.models.loaders import load_lm_model_ckpt, load_compression_model_ckpt
 from audiocraft.models import MusicGen
@@ -328,6 +319,8 @@ def compute_match_score(name, candidate, param_tensor, sd):
 
 
 if __name__ == '__main__':
+    # Help static analysis: globals that are set in some branches
+    max_memory_map = {}
     # Monkey patch autocast/TorchAutocast to disable meta autocast
     try:
         import importlib
@@ -355,54 +348,225 @@ if __name__ == '__main__':
         torch.autocast = _safe_autocast
     except Exception:
         pass
-    # Monkey-patch conditioners T5Conditioner.forward to avoid the 'embeds.to(self.output_proj.weight)' call
+
+    # Also patch T5EncoderModel / T5Conditioner / T5Attention to avoid meta/device issues
     try:
+        import transformers
+        from transformers.models.t5.modeling_t5 import T5Attention
+
+        # 1) Force T5EncoderModel to load weights directly on CPU (no meta/device_map/offload)
+        orig_from_pretrained = transformers.T5EncoderModel.from_pretrained
+
+        def _t5_from_pretrained_cpu(*args, **kwargs):
+            # Strip arguments that enable meta/offload loading
+            for bad_key in [
+                'device_map',
+                'low_cpu_mem_usage',
+                'offload_folder',
+                'offload_dir',
+                'load_in_8bit',
+                'load_in_4bit',
+            ]:
+                if bad_key in kwargs:
+                    kwargs.pop(bad_key, None)
+            # Ensure a standard CPU load in full precision
+            kwargs.setdefault('torch_dtype', torch.float32)
+            # Let HF create the model on CPU without using the meta backend
+            return orig_from_pretrained(*args, **kwargs)
+
+        transformers.T5EncoderModel.from_pretrained = _t5_from_pretrained_cpu
+
+        # 2) Patch T5Conditioner.forward: always run T5 on CPU and move result to LM device
         cond_mod = importlib.import_module('audiocraft.modules.conditioners')
         if hasattr(cond_mod, 'T5Conditioner'):
             T5Conditioner = getattr(cond_mod, 'T5Conditioner')
             orig_forward = T5Conditioner.forward
+
             def _patched_forward(self, *args, **kwargs):
-                placeholder_replaced = False
-                orig_weight = None
+                # Normalize inputs: T5Conditioner usually takes a dict
+                if args and not kwargs:
+                    inputs = args[0]
+                elif not args and kwargs:
+                    inputs = kwargs
+                else:
+                    inputs = {}
+
+                # T5 always lives on CPU; ensure inputs are on CPU
+                if isinstance(inputs, dict):
+                    new_inputs = {}
+                    for k, v in inputs.items():
+                        if isinstance(v, torch.Tensor):
+                            new_inputs[k] = v.to('cpu')
+                        else:
+                            new_inputs[k] = v
+                    inputs = new_inputs
+
+                # Hard patch: if output_proj.weight is meta, replace it with a real CPU tensor
                 try:
-                    # Debug: check if self.t5 has any meta params
-                    try:
-                        t5_meta_count = sum(1 for p in self.t5.parameters() if getattr(p, 'is_meta', False))
-                        print('T5 meta param count at forward:', t5_meta_count)
-                    except Exception:
-                        pass
                     if hasattr(self, 'output_proj') and hasattr(self.output_proj, 'weight'):
                         w = self.output_proj.weight
                         if getattr(w, 'is_meta', False):
-                            # create a cpu placeholder weight of same shape/dtype
+                            new_w = torch.nn.Parameter(torch.zeros_like(w, device='cpu'))
+                            self.output_proj.weight = new_w
+                except Exception:
+                    pass
+
+                # Also de-meta any other parameters/buffers on this conditioner
+                try:
+                    for name, p in list(self.named_parameters(recurse=True)):
+                        if getattr(p, 'is_meta', False):
+                            parent, attr = (name.rsplit('.', 1) + [''])[:2] if '.' in name else ('', name)
+                            sub = self
+                            if parent:
+                                for part in parent.split('.'):
+                                    sub = getattr(sub, part)
                             try:
-                                shape = tuple(w.shape)
-                                cpu_w = torch.nn.Parameter(torch.zeros(shape, dtype=w.dtype, device='cpu'))
-                                orig_weight = w
-                                self.output_proj.weight = cpu_w
-                                placeholder_replaced = True
+                                new_p = torch.nn.Parameter(torch.zeros_like(p, device='cpu'))
+                                setattr(sub, attr, new_p)
                             except Exception:
-                                placeholder_replaced = False
-                    out = orig_forward(self, *args, **kwargs)
+                                pass
+                    for name, b in list(self.named_buffers(recurse=True)):
+                        if isinstance(b, torch.Tensor) and getattr(b, 'is_meta', False):
+                            parent, attr = (name.rsplit('.', 1) + [''])[:2] if '.' in name else ('', name)
+                            sub = self
+                            if parent:
+                                for part in parent.split('.'):
+                                    sub = getattr(sub, part)
+                            try:
+                                sub.register_buffer(attr, torch.zeros_like(b, device='cpu'))
+                            except Exception:
+                                try:
+                                    setattr(sub, attr, torch.zeros_like(b, device='cpu'))
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+                # Call original forward to get (condition, mask) computed on CPU
+                condition, mask = orig_forward(self, inputs)
+
+                # Move condition to LM device (GPU if available) while keeping mask on CPU
+                target_device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+                try:
+                    condition = condition.to(target_device)
+                except Exception:
+                    pass
+
+                return condition, mask
+
+            T5Conditioner.forward = _patched_forward
+
+            # 3) Patch T5Attention.forward: aggressively de-meta and align buffers/position_bias
+            orig_forward_attn = T5Attention.forward
+
+            def _materialize_meta_in_module(module, device):
+                # Parameters
+                for name, p in list(module.named_parameters(recurse=True)):
+                    if getattr(p, 'is_meta', False):
+                        parent, attr = (name.rsplit('.', 1) + [''])[:2] if '.' in name else ('', name)
+                        sub = module
+                        if parent:
+                            for part in parent.split('.'):
+                                sub = getattr(sub, part)
+                        try:
+                            new_p = torch.nn.Parameter(torch.zeros_like(p, device=device))
+                            setattr(sub, attr, new_p)
+                        except Exception:
+                            pass
+                # Buffers
+                for name, b in list(module.named_buffers(recurse=True)):
+                    if isinstance(b, torch.Tensor) and getattr(b, 'is_meta', False):
+                        parent, attr = (name.rsplit('.', 1) + [''])[:2] if '.' in name else ('', name)
+                        sub = module
+                        if parent:
+                            for part in parent.split('.'):
+                                sub = getattr(sub, part)
+                        try:
+                            sub.register_buffer(attr, torch.zeros_like(b, device=device))
+                        except Exception:
+                            try:
+                                setattr(sub, attr, torch.zeros_like(b, device=device))
+                            except Exception:
+                                pass
+
+            def _patched_attn_forward(self, *args, **kwargs):
+                # Module's intended device
+                try:
+                    device = next(self.parameters()).device
+                except StopIteration:
+                    device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+
+                # First, materialize any meta params/buffers on this attention module
+                _materialize_meta_in_module(self, device)
+
+                # Ensure all non-meta buffers on module are on the same device
+                for name, b in list(self.named_buffers(recurse=True)):
+                    if isinstance(b, torch.Tensor) and not getattr(b, 'is_meta', False):
+                        if b.device != device:
+                            try:
+                                b.data = b.to(device)
+                            except Exception:
+                                pass
+
+                # If caller passed a position_bias kwarg, move it to device
+                if "position_bias" in kwargs and kwargs["position_bias"] is not None:
                     try:
-                        # Out may be a tuple (embeds, mask) or BaseModelOutput; inspect
-                        emb = None
-                        if isinstance(out, tuple):
-                            emb = out[0]
-                        elif hasattr(out, 'last_hidden_state'):
-                            emb = out.last_hidden_state
-                        if emb is not None:
-                            print('Embeds meta?:', getattr(emb, 'is_meta', False), 'dtype', getattr(emb, 'dtype', None), 'shape', getattr(emb, 'shape', None))
+                        if getattr(kwargs["position_bias"], 'is_meta', False):
+                            kwargs["position_bias"] = torch.zeros_like(kwargs["position_bias"], device=device)
+                        elif kwargs["position_bias"].device != device:
+                            kwargs["position_bias"] = kwargs["position_bias"].to(device)
                     except Exception:
                         pass
-                    return out
-                finally:
-                    if placeholder_replaced and orig_weight is not None:
-                        self.output_proj.weight = orig_weight
-            T5Conditioner.forward = _patched_forward
-            print('Patched audiocraft.modules.conditioners.T5Conditioner.forward to avoid meta .to() device errors')
+
+                # Call original attention forward
+                out = orig_forward_attn(self, *args, **kwargs)
+
+                # Best-effort: ensure any cached position_bias buffer is on the right device and not meta
+                try:
+                    for name, b in list(self.named_buffers(recurse=True)):
+                        if not isinstance(b, torch.Tensor):
+                            continue
+                        if getattr(b, 'is_meta', False):
+                            parent, attr = (name.rsplit('.', 1) + [''])[:2] if '.' in name else ('', name)
+                            sub = self
+                            if parent:
+                                for part in parent.split('.'):
+                                    sub = getattr(sub, part)
+                            try:
+                                sub.register_buffer(attr, torch.zeros_like(b, device=device))
+                            except Exception:
+                                try:
+                                    setattr(sub, attr, torch.zeros_like(b, device=device))
+                                except Exception:
+                                    pass
+                        elif b.device != device:
+                            try:
+                                b.data = b.to(device)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                return out
+
+            T5Attention.forward = _patched_attn_forward
+
+            print('Patched T5EncoderModel.from_pretrained, T5Conditioner.forward and T5Attention.forward to avoid meta/device issues')
+    except Exception as e:
+        print(f'Patch failed: {e}')
+    # Optional resource monitor used only when --monitor is set; provide a no-op fallback
+    try:
+        from audiocraft.utils.monitor import ResourceMonitor
     except Exception:
-        pass
+        class ResourceMonitor:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
     mname = 'facebook/musicgen-large'
     cache_dir = os.environ.get('AUDIOCRAFT_CACHE_DIR', '/workspace/cache')
     pkg_lm = load_lm_model_ckpt(mname, cache_dir=cache_dir)
@@ -1015,6 +1179,7 @@ if __name__ == '__main__':
     prompt_file = '/workspace/lyrics_terraform_my_heart.txt'
     prompt_text = None
     title = None
+    lyrics = None
     styles = None
     # Always prefer a fixed 60s generation for now (ignore metadata DURATION)
     if os.path.exists(prompt_file):
@@ -1025,7 +1190,7 @@ if __name__ == '__main__':
             gen_duration = 60
     model.set_generation_params(duration=gen_duration)
 
-    # Helper: materialize any meta parameters/buffers in a module (replace with zeros on CPU)
+    # Helper: materialize any meta parameters/buffers in a module (replace with zeros on the param's device)
     def materialize_meta_tensors(module, device='cpu'):
         # Parameters
         for name, p in list(module.named_parameters(recurse=True)):
@@ -1033,7 +1198,8 @@ if __name__ == '__main__':
                 if getattr(p, 'is_meta', False):
                     shape = tuple(p.shape)
                     dtype = p.dtype if hasattr(p, 'dtype') else torch.float32
-                    new_p = torch.nn.Parameter(torch.zeros(shape, dtype=dtype, device=device))
+                    dev = getattr(p, 'device', torch.device(device))
+                    new_p = torch.nn.Parameter(torch.zeros(shape, dtype=dtype, device=dev))
                     parent, attr = (name.rsplit('.', 1) + [''])[:2] if '.' in name else ('', name)
                     sub = module
                     if parent:
@@ -1051,16 +1217,17 @@ if __name__ == '__main__':
                 if isinstance(b, torch.Tensor) and getattr(b, 'is_meta', False):
                     shape = tuple(b.shape)
                     dtype = b.dtype if hasattr(b, 'dtype') else torch.float32
+                    dev = getattr(b, 'device', torch.device(device))
                     parent, attr = (name.rsplit('.', 1) + [''])[:2] if '.' in name else ('', name)
                     sub = module
                     if parent:
                         for part in parent.split('.'):
                             sub = getattr(sub, part)
                     try:
-                        sub.register_buffer(attr, torch.zeros(shape, dtype=dtype, device=device))
+                        sub.register_buffer(attr, torch.zeros(shape, dtype=dtype, device=dev))
                     except Exception:
                         try:
-                            setattr(sub, attr, torch.zeros(shape, dtype=dtype, device=device))
+                            setattr(sub, attr, torch.zeros(shape, dtype=dtype, device=dev))
                         except Exception:
                             pass
             except Exception:
@@ -1100,6 +1267,7 @@ if __name__ == '__main__':
             # compute from cpu-util-target
             import multiprocessing
             cpu_count = multiprocessing.cpu_count()
+            # Default to using up to ~80% of logical cores unless overridden
             target = min(max(0.05, float(args.cpu_util_target)), 1.0)
             num_threads = max(1, int(cpu_count * target))
         torch.set_num_threads(num_threads)
@@ -1190,9 +1358,8 @@ if __name__ == '__main__':
                         except Exception:
                             pass
                         try:
-                            # If LM has a condition provider, materialize its conditioners
-                            if hasattr(lm, 'condition_provider') and lm.condition_provider is not None:
-                                materialize_meta_tensors(lm.condition_provider, device='cpu')
+                            # Materialize any remaining meta tensors in the entire LM
+                            materialize_meta_tensors(lm, device='cpu')
                         except Exception:
                             pass
 

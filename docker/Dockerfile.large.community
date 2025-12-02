@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Default cache locations inside the container (can be overridden at runtime)
 ENV HF_HOME=/cache/hf \
-	TRANSFORMERS_CACHE=/cache/hf \
+	HF_HOME=/workspace/cache/huggingface \
 	AUDIOCRAFT_CACHE_DIR=/cache/audiocraft
 
 # Avoid unnecessary installs if the community image already has ffmpeg & pyav
