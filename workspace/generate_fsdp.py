@@ -54,6 +54,9 @@ parser.add_argument('--duration', type=int, default=6)
 parser.add_argument('--output', default=None, help='Output wav path. If not provided and --song-file is set, filename uses the song title')
 parser.add_argument('--song-file', default='/workspace/lyrics_terraform_my_heart.txt', help='Path to song text file containing title, lyrics, and style sections')
 parser.add_argument('--offload_folder', default='/workspace/offload')
+parser.add_argument('--temperature', type=float, default=None, help='Optional sampling temperature (lower = more deterministic)')
+parser.add_argument('--cfg_coef', type=float, default=None, help='Optional classifier-free guidance coefficient')
+parser.add_argument('--seed', type=int, default=None, help='Optional random seed for reproducibility')
 args = parser.parse_args()
 
 
@@ -136,7 +139,28 @@ def main():
             # If model is sharded/dispatch-managed, model.to(device) might fail; rely on accelerate to manage devices
             print('Could not `.to(device)` model directly after dispatch; relying on accelerate-managed devices')
 
-    model.set_generation_params(duration=args.duration)
+    # Set generation params; include optional knobs when available
+    gen_kwargs = {'duration': args.duration}
+    if args.temperature is not None:
+        gen_kwargs['temperature'] = args.temperature
+    if args.cfg_coef is not None:
+        gen_kwargs['cfg_coef'] = args.cfg_coef
+    if args.seed is not None:
+        gen_kwargs['seed'] = args.seed
+
+    try:
+        model.set_generation_params(**gen_kwargs)
+    except TypeError:
+        # Older audiocraft versions may only accept duration; fall back gracefully
+        model.set_generation_params(duration=args.duration)
+        # try to set attributes directly if present
+        for k, v in gen_kwargs.items():
+            if k == 'duration' or v is None:
+                continue
+            try:
+                setattr(model, k, v)
+            except Exception:
+                pass
 
     print('Generating...')
     start = time.time()

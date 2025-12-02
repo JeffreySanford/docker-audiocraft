@@ -37,6 +37,8 @@ The shell script invokes Python inside the container to import and print these s
 
 This indirection allows experimenting with styles without editing the shell script.
 
+Note on models: the orchestration supports selecting local or HF models via `workspace/models_manifest.json` and `workspace/hf_generate.py` (`--model-key`), so you can swap `musicgen-medium` for `musicgen-style` without changing the shell script when the manifest/cache is populated.
+
 ## Generation Details
 
 Small stems:

@@ -7,6 +7,7 @@ This document summarizes a possible roadmap for evolving this project from exper
 Status: mostly complete.
 
 - Run `musicgen-small` and `musicgen-medium` reliably in Docker.
+  - Manage local model checkpoints in `model-cache/` and map them with `workspace/models_manifest.json`; use `scripts/download_model.py` to populate caches on new machines.
 - Use `scripts/run_tests.sh` to validate the environment.
 - Use `scripts/generate_industrial_mix.sh` and `workspace/industrial_styles.py` to generate:
   - 5 × 60s small-model industrial stems.

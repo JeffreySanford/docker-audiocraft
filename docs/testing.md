@@ -16,6 +16,7 @@ The Bash script `scripts/run_tests.sh` performs the following steps on a Windows
    - Uses host-mounted caches:
      - `model-cache/`
      - `workspace/cache/`
+  - Optionally, use `scripts/download_model.py <hf_repo_id>` on the host to populate `model-cache/` before running tests. The manifest `workspace/models_manifest.json` maps short keys to HF ids and cache paths used by `workspace/hf_generate.py`.
 
 3. **Small model test (30s)**
    - Invokes `generate_fsdp.py` with:

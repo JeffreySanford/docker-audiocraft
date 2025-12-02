@@ -12,6 +12,8 @@ This document outlines high-level ideas and methods for creating AI-assisted car
 ## Components
 
 1. **Audio**: final WAV files from MusicGen (e.g. `industrial_mix_full.wav`).
+
+Model and assets note: keep model checkpoints in `model-cache/` and manage them with `workspace/models_manifest.json`; use `scripts/download_model.py` to pre-populate caches on any machine before running generation or downstream visual sync.
 2. **Characters**: AI-generated 2D cartoon characters (PNG images).
 3. **Backgrounds**: AI-generated scenes (industrial club, cityscapes, factories, etc.).
 4. **Beat and event analysis**: extracting tempo, beats, and onsets from audio.

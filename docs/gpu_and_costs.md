@@ -96,4 +96,8 @@ This is viable but more expensive and time-consuming, best reserved for special 
   - Large batches (e.g. 100+ tracks in one session).
   - Heavier video or large-model experiments.
 
+Model management note
+
+- Keep model checkpoints in the host `model-cache/` directory and reference them via `workspace/models_manifest.json` rather than committing large files into git. Use `scripts/download_model.py` to prefill `model-cache` on machines (local or cloud) before running heavy batches.
+
 By combining local GPU for experimentation and cloud GPUs for scaled rendering, you can keep overall costs in the tens of dollars for substantial amounts of content.

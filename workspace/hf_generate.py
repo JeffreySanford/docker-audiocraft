@@ -12,7 +12,8 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model-id', default='style', help='Model id for MusicGen (e.g. "style")')
+    parser.add_argument('--model-id', default=None, help='HuggingFace model id (e.g. "facebook/musicgen-style")')
+    parser.add_argument('--model-key', default=None, help='Optional key into workspace/models_manifest.json to select a cached model')
     parser.add_argument('--prompt', required=True)
     parser.add_argument('--duration', type=float, default=10.0)
     parser.add_argument('--output', required=True)
@@ -22,6 +23,8 @@ def main():
     args = parser.parse_args()
 
     try:
+        import json
+        import os
         import torchaudio
         from audiocraft.models import MusicGen
         from audiocraft.data.audio import audio_write
@@ -29,8 +32,42 @@ def main():
         print('Error importing audiocraft/torchaudio. Please install audiocraft per the README: pip install git+https://github.com/facebookresearch/audiocraft.git', file=sys.stderr)
         raise
 
-    print(f'Loading model: {args.model_id}')
-    model = MusicGen.get_pretrained(args.model_id)
+    # Determine model source: manifest key -> local path -> hf id
+    model_source = None
+    manifest_path = os.path.join(os.path.dirname(__file__), 'models_manifest.json')
+    if args.model_key and os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+            entry = manifest.get(args.model_key)
+            if entry:
+                # prefer local_path if it exists
+                lp = entry.get('local_path')
+                if lp:
+                    # try absolute path as-is
+                    if os.path.isabs(lp) and os.path.exists(lp):
+                        model_source = lp
+                    else:
+                        # common container mount for caches is /model-cache
+                        alt = os.path.join('/model-cache', os.path.basename(lp))
+                        if os.path.exists(alt):
+                            model_source = alt
+                # fallback to hf_id
+                if model_source is None and entry.get('hf_id'):
+                    model_source = entry.get('hf_id')
+        except Exception:
+            model_source = None
+
+    # If model_source still None, use explicit model_id if provided
+    if model_source is None:
+        if args.model_id:
+            model_source = args.model_id
+        else:
+            # default to 'style' if nothing provided (backwards compat)
+            model_source = 'style'
+
+    print(f'Loading model source: {model_source}')
+    model = MusicGen.get_pretrained(model_source)
     model.set_generation_params(duration=args.duration)
 
     prompt = args.prompt

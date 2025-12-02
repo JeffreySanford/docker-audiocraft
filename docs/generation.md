@@ -8,6 +8,10 @@ This project wraps Meta's MusicGen models (`facebook/musicgen-small`, `-medium`,
   - Run on GPU with automatic sharding/dispatch.
   - Prompts are short natural-language descriptions.
 - `large`: driven by `run_large_offload3.py`.
+
+Model manifest and local caches
+
+- We keep a small manifest at `workspace/models_manifest.json` mapping friendly keys to HF model ids and local cache folders. Use `scripts/download_model.py <hf_repo_id>` to populate `model-cache/` and then pass `--model-key <key>` to `workspace/hf_generate.py` to load the cached model without changing scripts.
   - Language model (LM) is sharded across GPU and CPU using `accelerate.dispatch_model` and a balanced `max_memory` map.
   - Compression/codec (Encodec) is kept primarily on CPU/disk with optional offload.
   - Text conditioning uses a T5 encoder model, pinned to CPU to avoid meta-device issues, with embeddings moved to the LM device.

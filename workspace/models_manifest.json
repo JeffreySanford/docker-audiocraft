@@ -1,0 +1,20 @@
+{
+  "musicgen-small": {
+    "hf_id": "facebook/musicgen-small",
+    "local_path": "models--facebook--musicgen-small",
+    "purpose": "fast sketches and stems",
+    "license": "apache-2.0"
+  },
+  "musicgen-medium": {
+    "hf_id": "facebook/musicgen-medium",
+    "local_path": "models--facebook--musicgen-medium",
+    "purpose": "higher-quality mixes",
+    "license": "apache-2.0"
+  },
+  "musicgen-style": {
+    "hf_id": "facebook/musicgen-style",
+    "local_path": "models--facebook--musicgen-style",
+    "purpose": "style-conditioned generation (requires short style audio)",
+    "license": "apache-2.0"
+  }
+}

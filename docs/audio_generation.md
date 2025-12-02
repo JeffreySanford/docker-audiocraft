@@ -19,6 +19,12 @@ This document describes how we use Audiocraft/MusicGen in Docker to generate ind
   - `model-cache/` on the host, mounted into the container.
   - Within containers, `HF_HOME=/cache` and `AUDIOCRAFT_CACHE_DIR=/cache`.
 
+## Model Manifest and Local Models
+
+- We maintain a small manifest file `workspace/models_manifest.json` that maps short keys to HF model IDs and local cache folder names (e.g. `musicgen-small`, `musicgen-style`).
+- Use `scripts/download_model.py <hf_repo_id>` to populate `model-cache/` with checkpoints (do not commit checkpoints into Git).
+- The HF wrapper `workspace/hf_generate.py` supports `--model-key` to load models from the manifest or `--model-id` for direct HF ids.
+
 ## Core Commands
 
 The main script used for music generation is `workspace/generate_fsdp.py`. Within Docker, we typically run commands like:
